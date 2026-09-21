@@ -20,7 +20,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install Dependencies
         run: |
@@ -33,7 +32,7 @@ jobs:
         run: |
           python dubplate_scanner.py
 
-      - name: Commit & Push Seen Dubs History
+      - name: Commit & Push History
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -44,4 +43,3 @@ jobs:
             git commit -m "Update seen dubplates history [skip ci]"
             git push
           fi
-
