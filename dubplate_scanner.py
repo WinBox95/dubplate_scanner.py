@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Automated 140 & Dubstep Dubplate Scanner (V2 - Strict Free & Fresh Filters)
-==========================================================================
-Filters strictly for:
-1. Real direct track links (NEVER the main label profile URL)
-2. Freshness (Only tracks from the last 90 days, skipping old back-catalogs)
-3. Verified Free Downloads / Download Gates (Hypeddit, ToneDen, [FREE DL])
-   - Filters out paid tracks that just have "VIP" or "Dubplate" in the title.
+Automated 140 & Dubstep Dubplate Scanner (V3 - Strict Anti-Merch & 45-Day Freshness)
+===================================================================================
+1. Strict Anti-Merch Filter: Instantly ignores vinyl, pre-orders, cassettes, and merch.
+2. 45-Day Freshness Guard: Automatically rejects anything older than 45 days across
+   both SoundCloud and Bandcamp.
+3. Verified Free Downloads Only: Requires explicit [FREE DL] tags or Hypeddit/ToneDen gates.
 """
 
 import os
@@ -30,7 +29,6 @@ from bs4 import BeautifulSoup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("140Scanner")
 
-# 22 Individual Underground 140 Producers (SoundCloud)
 SOUNDCLOUD_PRODUCERS = [
     ("Criso", "https://soundcloud.com/crisosound/tracks"),
     ("Wraz", "https://soundcloud.com/wraz/tracks"),
@@ -56,7 +54,6 @@ SOUNDCLOUD_PRODUCERS = [
     ("Rareman", "https://soundcloud.com/rareman/tracks")
 ]
 
-# Sound System Channels & Collectives (SoundCloud)
 SOUNDCLOUD_COLLECTIVES = [
     ("Stance Audio", "https://soundcloud.com/stanceaudio/tracks"),
     ("Infernal Sounds", "https://soundcloud.com/infernalsounds/tracks"),
@@ -67,7 +64,6 @@ SOUNDCLOUD_COLLECTIVES = [
     ("Dank 'N' Dirty Dubz", "https://soundcloud.com/dankndirtydubz/tracks")
 ]
 
-# Bandcamp Netlabels (Subdomains)
 BANDCAMP_NETLABELS = [
     ("WiddFam", "widdfam"),
     ("Dank 'N' Dirty Dubz", "dankndirtydubz"),
@@ -84,7 +80,13 @@ BANDCAMP_NETLABELS = [
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 90  # Strictly ignore tracks older than 90 days
+MAX_AGE_DAYS = 45  # Strictly ignore tracks/releases older than 45 days
+
+MERCH_BLOCKLIST = [
+    "vinyl", "pre-order", "preorder", "pre order", "12\"", "7\"",
+    "lathe cut", "cassette", "tape", "merch", "t-shirt", "hoodie",
+    "shipping", "buy now", "out now on", "forthcoming on"
+]
 
 
 class DubplateMonitor:
@@ -136,7 +138,6 @@ class DubplateMonitor:
         reserved_slugs = ("tracks", "albums", "sets", "reposts", "followers", "following", "popular-tracks", "comments")
 
         for art in articles:
-            # 1. Resolve Exact Track Link (Never profile link)
             track_url = None
             track_title = None
             for a in art.find_all("a", href=True):
@@ -150,7 +151,16 @@ class DubplateMonitor:
             if not track_url or not track_title or track_url in self.seen_urls:
                 continue
 
-            # 2. Strict Freshness Filter
+            full_text = art.get_text(separator=" ").lower()
+            title_lower = track_title.lower()
+
+            # 1. Reject Vinyl / Pre-Orders / Merch
+            if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "pre order", "12\"", "cassette"]):
+                continue
+            if any(term in full_text for term in MERCH_BLOCKLIST) and not any(f in title_lower for f in ["[free dl]", "(free dl)", "free download"]):
+                continue
+
+            # 2. Strict Freshness Filter (Reject > 45 days)
             is_old = False
             time_el = art.find("time")
             if time_el:
@@ -163,20 +173,20 @@ class DubplateMonitor:
                     except Exception:
                         pass
                 t_text = time_el.get_text().lower()
-                if re.search(r'(\d+y|\d+\s*year)', t_text):
-                    is_old = True
+                if re.search(r'(\d+\s*year|\d+y\b|\d+\s*month|\d+mo\b)', t_text):
+                    m = re.search(r'(\d+)\s*month', t_text)
+                    if m and int(m.group(1)) > 1:
+                        is_old = True
+                    elif not m or re.search(r'(\d+\s*year|\d+y\b)', t_text):
+                        is_old = True
 
             if is_old:
                 continue
 
-            # 3. Strict Free / Gate Verification
-            full_text = art.get_text(separator=" ").lower()
-            title_lower = track_title.lower()
-
-            has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com|drive\.google\.com)', full_text))
+            # 3. Strict Free DL / Gate Verification
+            has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', full_text))
             has_free_in_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title_lower))
 
-            # Exclude paid releases that just happen to say VIP or Dubplate
             if not (has_gate or has_free_in_title):
                 continue
 
@@ -197,9 +207,9 @@ class DubplateMonitor:
             }
             self.seen_urls.add(track_url)
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW FREE SC DUB: {name} - {track_title} ({track_url})")
+            logger.info(f"[*] NEW FREE SC DUB: {name} - {track_title}")
 
-    # --- Bandcamp Scanner ---
+    # --- Strict Bandcamp Scanner ---
     def scan_bandcamp_label(self, name, sub):
         base_url = f"https://{sub}.bandcamp.com"
         music_url = f"{base_url}/music"
@@ -226,11 +236,49 @@ class DubplateMonitor:
             return
         self.seen_urls.add(url)
 
+        # 1. Anti-Merch / Anti-Vinyl check
+        url_lower = url.lower()
+        if any(term in url_lower for term in ["vinyl", "preorder", "pre-order"]):
+            return
+
+        # 2. Check TralbumData & Dates
         is_nyp = False
         m = re.search(r'data-tralbum="([^"]+)"', txt)
         tr = json.loads(html.unescape(m.group(1))) if m else None
+        
+        # Freshness Check (Bandcamp datePublished or publish_date)
+        pub_date = None
         if tr:
             cur = tr.get("current", {})
+            raw_date = cur.get("publish_date") or cur.get("release_date")
+            if raw_date:
+                try:
+                    clean_d = re.sub(r'\s+[A-Z]{3,4}$', '', raw_date).strip()
+                    pub_date = datetime.strptime(clean_d[:20].strip(), "%d %b %Y %H:%M:%S")
+                except Exception:
+                    pass
+
+        if not pub_date:
+            m_date = re.search(r'itemprop="datePublished"\s+content="([^"]+)"', txt)
+            if m_date:
+                try:
+                    pub_date = datetime.fromisoformat(m_date.group(1).split("T")[0])
+                except Exception:
+                    pass
+
+        # If release is older than MAX_AGE_DAYS, REJECT immediately
+        if pub_date:
+            age = (datetime.now() - pub_date).days
+            if age > MAX_AGE_DAYS:
+                return
+
+        # 3. Check for NYP
+        if tr:
+            cur = tr.get("current", {})
+            title = cur.get("title", "")
+            if any(neg in title.lower() for neg in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
+                return
+
             if cur.get("download_pref") == 1 or cur.get("min_price") == 0 or cur.get("freeDownloadPage"):
                 is_nyp = True
             for t in tr.get("trackinfo", []):
@@ -240,7 +288,7 @@ class DubplateMonitor:
         if not is_nyp:
             soup = BeautifulSoup(txt, "html.parser")
             buy = " ".join(el.get_text() for el in soup.find_all(class_=re.compile(r'(buyItem|download-link)'))).lower()
-            if "name your price" in buy or "free download" in buy:
+            if ("name your price" in buy or "free download" in buy) and not any(term in buy for term in ["vinyl", "pre-order", "preorder"]):
                 is_nyp = True
 
         if is_nyp:
@@ -254,7 +302,7 @@ class DubplateMonitor:
                 "category": "Name Your Price / Free"
             }
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title} ({url})")
+            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title}")
 
     # --- Discord Webhook Notification ---
     @staticmethod
@@ -270,9 +318,9 @@ class DubplateMonitor:
                 "fields": [
                     {"name": "Artist / Channel", "value": item["artist"], "inline": True},
                     {"name": "Platform", "value": item["source"], "inline": True},
-                    {"name": "Type", "value": item["category"], "inline": True}
+                    {"name": "Category", "value": item["category"], "inline": True}
                 ],
-                "footer": {"text": "140 Sound System Dubplate Alert • Fresh Drop"},
+                "footer": {"text": "140 Dubplate Monitor • Fresh Free Drop"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }]
         }
@@ -289,7 +337,7 @@ class DubplateMonitor:
         print("\n" + "=" * 75)
         print("  140 & DUBSTEP DUBPLATE MONITOR (STRICT FREE & FRESH)")
         print("=" * 75)
-        print(f"[*] Max Age Threshold: Last {MAX_AGE_DAYS} Days (Filtering out old catalogs)")
+        print(f"[*] Freshness Threshold: Last {MAX_AGE_DAYS} Days (Filtering out old catalogs & vinyl pre-orders)")
         print(f"[*] Auditing {len(SOUNDCLOUD_PRODUCERS)} Producers + {len(SOUNDCLOUD_COLLECTIVES)} Channels on SoundCloud...")
 
         for name, url in SOUNDCLOUD_PRODUCERS + SOUNDCLOUD_COLLECTIVES:
@@ -307,14 +355,7 @@ class DubplateMonitor:
             for item in self.new_discoveries:
                 self.send_to_discord(webhook_url, item)
 
-        if self.new_discoveries:
-            with open("fresh_dubs.txt", "w", encoding="utf-8") as f:
-                f.write(f"# Fresh 140 Drops ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n")
-                for d in self.new_discoveries:
-                    f.write(f"[{d['source']}] {d['artist']} - {d['title']} ({d['category']})\n{d['url']}\n\n")
-
 
 if __name__ == "__main__":
     monitor = DubplateMonitor()
     monitor.run()
-
