@@ -1,0 +1,47 @@
+name: 140 Dubplate Scanner
+
+on:
+  schedule:
+    # Runs every 6 hours automatically
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub mobile or web
+
+jobs:
+  scan-and-notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install curl_cffi beautifulsoup4 requests
+
+      - name: Run Dubplate Scanner
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python dubplate_scanner.py
+
+      - name: Commit & Push Seen Dubs History
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_dubs.json fresh_dubs.txt || true
+          if git diff --staged --quiet; then
+            echo "No new drops found. Everything up to date."
+          else
+            git commit -m "Update seen dubplates history [skip ci]"
+            git push
+          fi
+
