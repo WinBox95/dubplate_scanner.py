@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated 140 & Dubstep Dubplate Scanner (V3 - Strict Anti-Merch & 45-Day Freshness)
-===================================================================================
-1. Strict Anti-Merch Filter: Instantly ignores vinyl, pre-orders, cassettes, and merch.
-2. 45-Day Freshness Guard: Automatically rejects anything older than 45 days across
-   both SoundCloud and Bandcamp.
-3. Verified Free Downloads Only: Requires explicit [FREE DL] tags or Hypeddit/ToneDen gates.
+Automated 140 & Dubstep Dubplate Scanner (V4 - Instant Feedback & Smart Dedup)
 """
 
 import os
@@ -80,7 +75,7 @@ BANDCAMP_NETLABELS = [
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 45  # Strictly ignore tracks/releases older than 45 days
+MAX_AGE_DAYS = 90  # 3-month window for dubplates
 
 MERCH_BLOCKLIST = [
     "vinyl", "pre-order", "preorder", "pre order", "12\"", "7\"",
@@ -127,7 +122,6 @@ class DubplateMonitor:
                 time.sleep(1)
         return None
 
-    # --- Strict SoundCloud Scanner ---
     def scan_soundcloud_channel(self, name, url):
         html_text = self.fetch(url)
         if not html_text:
@@ -154,13 +148,13 @@ class DubplateMonitor:
             full_text = art.get_text(separator=" ").lower()
             title_lower = track_title.lower()
 
-            # 1. Reject Vinyl / Pre-Orders / Merch
-            if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "pre order", "12\"", "cassette"]):
+            # Reject vinyl/merch
+            if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
                 continue
             if any(term in full_text for term in MERCH_BLOCKLIST) and not any(f in title_lower for f in ["[free dl]", "(free dl)", "free download"]):
                 continue
 
-            # 2. Strict Freshness Filter (Reject > 45 days)
+            # Check age
             is_old = False
             time_el = art.find("time")
             if time_el:
@@ -173,17 +167,16 @@ class DubplateMonitor:
                     except Exception:
                         pass
                 t_text = time_el.get_text().lower()
-                if re.search(r'(\d+\s*year|\d+y\b|\d+\s*month|\d+mo\b)', t_text):
-                    m = re.search(r'(\d+)\s*month', t_text)
-                    if m and int(m.group(1)) > 1:
-                        is_old = True
-                    elif not m or re.search(r'(\d+\s*year|\d+y\b)', t_text):
-                        is_old = True
+                if re.search(r'(\d+\s*year|\d+y\b)', t_text):
+                    is_old = True
+                m = re.search(r'(\d+)\s*month', t_text)
+                if m and int(m.group(1)) > 3:
+                    is_old = True
 
             if is_old:
                 continue
 
-            # 3. Strict Free DL / Gate Verification
+            # Free DL verification
             has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', full_text))
             has_free_in_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title_lower))
 
@@ -209,7 +202,6 @@ class DubplateMonitor:
             self.new_discoveries.append(item)
             logger.info(f"[*] NEW FREE SC DUB: {name} - {track_title}")
 
-    # --- Strict Bandcamp Scanner ---
     def scan_bandcamp_label(self, name, sub):
         base_url = f"https://{sub}.bandcamp.com"
         music_url = f"{base_url}/music"
@@ -236,17 +228,13 @@ class DubplateMonitor:
             return
         self.seen_urls.add(url)
 
-        # 1. Anti-Merch / Anti-Vinyl check
-        url_lower = url.lower()
-        if any(term in url_lower for term in ["vinyl", "preorder", "pre-order"]):
+        if any(term in url.lower() for term in ["vinyl", "preorder", "pre-order"]):
             return
 
-        # 2. Check TralbumData & Dates
         is_nyp = False
         m = re.search(r'data-tralbum="([^"]+)"', txt)
         tr = json.loads(html.unescape(m.group(1))) if m else None
-        
-        # Freshness Check (Bandcamp datePublished or publish_date)
+
         pub_date = None
         if tr:
             cur = tr.get("current", {})
@@ -266,19 +254,14 @@ class DubplateMonitor:
                 except Exception:
                     pass
 
-        # If release is older than MAX_AGE_DAYS, REJECT immediately
-        if pub_date:
-            age = (datetime.now() - pub_date).days
-            if age > MAX_AGE_DAYS:
-                return
+        if pub_date and (datetime.now() - pub_date).days > MAX_AGE_DAYS:
+            return
 
-        # 3. Check for NYP
         if tr:
             cur = tr.get("current", {})
             title = cur.get("title", "")
             if any(neg in title.lower() for neg in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
                 return
-
             if cur.get("download_pref") == 1 or cur.get("min_price") == 0 or cur.get("freeDownloadPage"):
                 is_nyp = True
             for t in tr.get("trackinfo", []):
@@ -304,40 +287,25 @@ class DubplateMonitor:
             self.new_discoveries.append(item)
             logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title}")
 
-    # --- Discord Webhook Notification ---
     @staticmethod
-    def send_to_discord(webhook_url, item):
+    def send_to_discord(webhook_url, payload):
         if not webhook_url:
             return
-        color = 0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3
-        payload = {
-            "embeds": [{
-                "title": f"🔊 {item['title'][:250]}",
-                "url": item["url"],
-                "color": color,
-                "fields": [
-                    {"name": "Artist / Channel", "value": item["artist"], "inline": True},
-                    {"name": "Platform", "value": item["source"], "inline": True},
-                    {"name": "Category", "value": item["category"], "inline": True}
-                ],
-                "footer": {"text": "140 Dubplate Monitor • Fresh Free Drop"},
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }]
-        }
         try:
             import requests as req
-            resp = req.post(webhook_url, json=payload, timeout=10)
+            req.post(webhook_url, json=payload, timeout=10)
             time.sleep(0.5)
         except Exception as e:
             logger.error(f"Failed to post to Discord: {e}")
 
     def run(self):
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+        is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
         print("\n" + "=" * 75)
-        print("  140 & DUBSTEP DUBPLATE MONITOR (STRICT FREE & FRESH)")
+        print("  140 DUBPLATE MONITOR (V4 - LIVE STATUS & DEDUP)")
         print("=" * 75)
-        print(f"[*] Freshness Threshold: Last {MAX_AGE_DAYS} Days (Filtering out old catalogs & vinyl pre-orders)")
+        print(f"[*] Trigger Mode: {'Manual (Phone Dispatch)' if is_manual_trigger else 'Automated Schedule'}")
         print(f"[*] Auditing {len(SOUNDCLOUD_PRODUCERS)} Producers + {len(SOUNDCLOUD_COLLECTIVES)} Channels on SoundCloud...")
 
         for name, url in SOUNDCLOUD_PRODUCERS + SOUNDCLOUD_COLLECTIVES:
@@ -349,11 +317,40 @@ class DubplateMonitor:
 
         self.save_history()
 
-        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} verified fresh free releases.")
-        if webhook_url and self.new_discoveries:
-            print(f"[*] Dispatching {len(self.new_discoveries)} alerts to Discord...")
-            for item in self.new_discoveries:
-                self.send_to_discord(webhook_url, item)
+        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} new releases.")
+
+        if webhook_url:
+            if self.new_discoveries:
+                print(f"[*] Dispatching {len(self.new_discoveries)} releases to Discord...")
+                for item in self.new_discoveries:
+                    color = 0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3
+                    payload = {
+                        "embeds": [{
+                            "title": f"🔊 {item['title'][:250]}",
+                            "url": item["url"],
+                            "color": color,
+                            "fields": [
+                                {"name": "Artist / Channel", "value": item["artist"], "inline": True},
+                                {"name": "Platform", "value": item["source"], "inline": True},
+                                {"name": "Category", "value": item["category"], "inline": True}
+                            ],
+                            "footer": {"text": "140 Dubplate Monitor • Fresh Free Drop"},
+                            "timestamp": datetime.utcnow().isoformat() + "Z"
+                        }]
+                    }
+                    self.send_to_discord(webhook_url, payload)
+            elif is_manual_trigger:
+                print("[*] Sending manual scan heartbeat to Discord...")
+                status_payload = {
+                    "embeds": [{
+                        "title": "🟢 140 Dubplate Scanner: Active & Synced",
+                        "description": f"Audited **29 underground producers & netlabels**.\n\n**Status:** 0 new free dubplates dropped in the last scan window.\n*Everything is running properly.*",
+                        "color": 0x2ecc71,
+                        "footer": {"text": "Automated schedule active every 6 hours"},
+                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                    }]
+                }
+                self.send_to_discord(webhook_url, status_payload)
 
 
 if __name__ == "__main__":
