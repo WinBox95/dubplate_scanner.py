@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Automated 140 & Dubstep Dubplate Scanner (V3 - Strict Anti-Merch & 45-Day Freshness)
-===================================================================================
-1. Strict Anti-Merch Filter: Instantly ignores vinyl, pre-orders, cassettes, and merch.
-2. 45-Day Freshness Guard: Automatically rejects anything older than 45 days across
-   both SoundCloud and Bandcamp.
-3. Verified Free Downloads Only: Requires explicit [FREE DL] tags or Hypeddit/ToneDen gates.
+Tag-Driven 140 & Dubstep Free Dubplate Scanner (Zero Artist Hardcoding)
+======================================================================
+Discovers fresh 140 sound system dubplates, bootlegs, and Name-Your-Price
+releases globally across SoundCloud and Bandcamp based strictly on:
+1. Genre & Style Tags (140, deep dubstep, sound system music, 140 dubplate, 140 flip)
+2. Verified Free Downloads & Download Gates (Hypeddit, ToneDen, direct DL, NYP)
+3. Freshness (Uploaded within the last 45 days)
+4. Anti-Merch Filter (Completely ignores vinyl, pre-orders, and physical merchandise)
 """
 
 import os
@@ -15,7 +17,7 @@ import time
 import html
 import logging
 from datetime import datetime, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote_plus
 
 try:
     from curl_cffi import requests as cffi_requests
@@ -27,69 +29,38 @@ except ImportError:
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-logger = logging.getLogger("140Scanner")
+logger = logging.getLogger("140TagScanner")
 
-SOUNDCLOUD_PRODUCERS = [
-    ("Criso", "https://soundcloud.com/crisosound/tracks"),
-    ("Wraz", "https://soundcloud.com/wraz/tracks"),
-    ("Substrada", "https://soundcloud.com/substrada/tracks"),
-    ("Basura", "https://soundcloud.com/basuradub/tracks"),
-    ("11th Hour", "https://soundcloud.com/11th_hour/tracks"),
-    ("Dalek One", "https://soundcloud.com/dalekone/tracks"),
-    ("Cartridge", "https://soundcloud.com/cartridgedub/tracks"),
-    ("Abstrakt Sonance", "https://soundcloud.com/abstraktsonance/tracks"),
-    ("Ourman", "https://soundcloud.com/ourmansound/tracks"),
-    ("Biak", "https://soundcloud.com/biakdub/tracks"),
-    ("Roklem & Sebalo", "https://soundcloud.com/roklem/tracks"),
-    ("Die By The Sword", "https://soundcloud.com/diebythesword/tracks"),
-    ("IDHS", "https://soundcloud.com/idhsmusic/tracks"),
-    ("Umbra", "https://soundcloud.com/umbra-uk/tracks"),
-    ("Takjacob", "https://soundcloud.com/takjacob/tracks"),
-    ("Sub Basics", "https://soundcloud.com/sub-basics/tracks"),
-    ("Chad Dubz", "https://soundcloud.com/chaddubz/tracks"),
-    ("Kercha", "https://soundcloud.com/kercha/tracks"),
-    ("Taiko", "https://soundcloud.com/taikouk/tracks"),
-    ("Bukez Finezt", "https://soundcloud.com/bukezfinezt/tracks"),
-    ("Mikrodot", "https://soundcloud.com/mikrodot/tracks"),
-    ("Rareman", "https://soundcloud.com/rareman/tracks")
+# Global SoundCloud Tag & Style Queries
+SC_TAG_QUERIES = [
+    '140 "free dl"',
+    'deep dubstep "free dl"',
+    '140 dubplate "free dl"',
+    '140 bootleg "free dl"',
+    '140 "free download"',
+    'deep dubstep "free download"',
+    'sound system music "free dl"',
+    '140 flip "free dl"'
 ]
 
-SOUNDCLOUD_COLLECTIVES = [
-    ("Stance Audio", "https://soundcloud.com/stanceaudio/tracks"),
-    ("Infernal Sounds", "https://soundcloud.com/infernalsounds/tracks"),
-    ("WiddFam", "https://soundcloud.com/widdfam/tracks"),
-    ("FatKidOnFire", "https://soundcloud.com/fatkidonfire/tracks"),
-    ("Honey & Bass", "https://soundcloud.com/honeyandbass/tracks"),
-    ("DUPLOC", "https://soundcloud.com/duploc/tracks"),
-    ("Dank 'N' Dirty Dubz", "https://soundcloud.com/dankndirtydubz/tracks")
-]
-
-BANDCAMP_NETLABELS = [
-    ("WiddFam", "widdfam"),
-    ("Dank 'N' Dirty Dubz", "dankndirtydubz"),
-    ("FatKidOnFire", "fatkidonfire"),
-    ("Cimmerian Records", "cimmerianrecords"),
-    ("Honey & Bass", "honeyandbass"),
-    ("Foundation Audio", "foundationaudio"),
-    ("Transient Audio", "transientaudio"),
-    ("Locus Sound", "locussound"),
-    ("SubFreq Audio", "subfreqaudio"),
-    ("Banana Stand Sound", "bananastandsound"),
-    ("Infernal Sounds", "infernalsounds"),
-    ("Encrypted Audio", "encryptedaudio")
+# Bandcamp Tag Discovery Hubs
+BC_TAG_HUBS = [
+    "https://bandcamp.com/tag/140",
+    "https://bandcamp.com/tag/deep-dubstep",
+    "https://bandcamp.com/tag/sound-system-music"
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 45  # Strictly ignore tracks/releases older than 45 days
+MAX_AGE_DAYS = 45  # Freshness window (ignore anything older than 45 days)
 
-MERCH_BLOCKLIST = [
-    "vinyl", "pre-order", "preorder", "pre order", "12\"", "7\"",
-    "lathe cut", "cassette", "tape", "merch", "t-shirt", "hoodie",
-    "shipping", "buy now", "out now on", "forthcoming on"
+FALLBACK_CLIENT_IDS = [
+    "iZIs9mchVcX5lhVR1EzGCcyEVAazo9J4",
+    "b77c5d01217e949ff6a9926a793a8d79",
+    "2t9loNfh0ekOfbnFeO3wEiHGMIVk3o28"
 ]
 
 
-class DubplateMonitor:
+class TagDrivenScanner:
     def __init__(self, delay=1.0):
         self.delay = delay
         self.seen_urls = self.load_history()
@@ -97,11 +68,13 @@ class DubplateMonitor:
         self.now = datetime.now(timezone.utc)
 
         if USE_CURL:
-            logger.info("Using curl_cffi Chrome TLS impersonation.")
+            logger.info("Using curl_cffi with Chrome TLS impersonation.")
             self.session = cffi_requests.Session(impersonate="chrome120")
         else:
             self.session = requests.Session()
             self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+
+        self.sc_client_id = self.get_soundcloud_client_id()
 
     def load_history(self):
         if os.path.exists(HISTORY_FILE):
@@ -116,137 +89,131 @@ class DubplateMonitor:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(list(self.seen_urls), f, indent=2)
 
-    def fetch(self, url):
-        time.sleep(self.delay)
-        for _ in range(2):
-            try:
-                r = self.session.get(url, timeout=15)
-                if r.status_code == 200:
-                    return r.text
-            except Exception:
-                time.sleep(1)
-        return None
+    def get_soundcloud_client_id(self):
+        try:
+            resp = self.session.get("https://soundcloud.com", timeout=10)
+            if resp.status_code == 200:
+                scripts = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', resp.text)
+                for s_url in scripts[-4:]:
+                    s_resp = self.session.get(s_url, timeout=10)
+                    m = re.search(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', s_resp.text)
+                    if m:
+                        logger.info(f"Dynamically extracted SoundCloud client_id: {m.group(1)[:8]}...")
+                        return m.group(1)
+        except Exception:
+            pass
+        return FALLBACK_CLIENT_IDS[0]
 
-    # --- Strict SoundCloud Scanner ---
-    def scan_soundcloud_channel(self, name, url):
-        html_text = self.fetch(url)
-        if not html_text:
+    # --- Global SoundCloud Search via Tags & Free DL Filters ---
+    def search_soundcloud_tags(self, query, limit=20):
+        logger.info(f"Searching SoundCloud for: '{query}'")
+        search_url = f"https://api-v2.soundcloud.com/search/tracks?q={quote_plus(query)}&client_id={self.sc_client_id}&limit={limit}&access=playable"
+
+        time.sleep(self.delay)
+        try:
+            resp = self.session.get(search_url, timeout=15)
+            if resp.status_code != 200:
+                return
+            data = resp.json()
+            tracks = data.get("collection", [])
+        except Exception as e:
+            logger.debug(f"SoundCloud search error: {e}")
             return
 
-        soup = BeautifulSoup(html_text, "html.parser")
-        articles = soup.find_all("article")
-        reserved_slugs = ("tracks", "albums", "sets", "reposts", "followers", "following", "popular-tracks", "comments")
-
-        for art in articles:
-            track_url = None
-            track_title = None
-            for a in art.find_all("a", href=True):
-                href = a["href"].split("?")[0].strip()
-                parts = [p for p in href.strip("/").split("/") if p]
-                if len(parts) == 2 and parts[1].lower() not in reserved_slugs:
-                    track_url = f"https://soundcloud.com/{parts[0]}/{parts[1]}"
-                    track_title = a.get_text(strip=True)
-                    break
-
-            if not track_url or not track_title or track_url in self.seen_urls:
+        for tr in tracks:
+            permalink = tr.get("permalink_url", "")
+            title = tr.get("title", "")
+            if not permalink or not title or permalink in self.seen_urls:
                 continue
 
-            full_text = art.get_text(separator=" ").lower()
-            title_lower = track_title.lower()
+            # 1. Freshness Filter
+            created_at = tr.get("created_at")
+            if created_at:
+                try:
+                    pub = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    if (self.now - pub).days > MAX_AGE_DAYS:
+                        continue
+                except Exception:
+                    pass
 
-            # 1. Reject Vinyl / Pre-Orders / Merch
-            if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "pre order", "12\"", "cassette"]):
-                continue
-            if any(term in full_text for term in MERCH_BLOCKLIST) and not any(f in title_lower for f in ["[free dl]", "(free dl)", "free download"]):
-                continue
-
-            # 2. Strict Freshness Filter (Reject > 45 days)
-            is_old = False
-            time_el = art.find("time")
-            if time_el:
-                dt_str = time_el.get("datetime")
-                if dt_str:
-                    try:
-                        pub_date = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-                        if (self.now - pub_date).days > MAX_AGE_DAYS:
-                            is_old = True
-                    except Exception:
-                        pass
-                t_text = time_el.get_text().lower()
-                if re.search(r'(\d+\s*year|\d+y\b|\d+\s*month|\d+mo\b)', t_text):
-                    m = re.search(r'(\d+)\s*month', t_text)
-                    if m and int(m.group(1)) > 1:
-                        is_old = True
-                    elif not m or re.search(r'(\d+\s*year|\d+y\b)', t_text):
-                        is_old = True
-
-            if is_old:
+            # 2. Anti-Merch / Anti-Vinyl Check
+            purchase_url = tr.get("purchase_url") or ""
+            desc = tr.get("description") or ""
+            comb = f"{title} {desc} {purchase_url}".lower()
+            if any(term in comb for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
                 continue
 
-            # 3. Strict Free DL / Gate Verification
-            has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', full_text))
-            has_free_in_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title_lower))
+            # 3. Verified Free DL / Download Gate
+            downloadable = tr.get("downloadable", False)
+            has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', comb))
+            has_free_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title.lower()))
 
-            if not (has_gate or has_free_in_title):
+            if not (downloadable or has_gate or has_free_title):
                 continue
 
-            cat = "Direct Free DL"
-            if "hypeddit" in full_text:
+            artist = tr.get("user", {}).get("username", "Underground Producer")
+            cat = "Direct Free Download"
+            if "hypeddit" in comb:
                 cat = "Hypeddit Download Gate"
-            elif "toneden" in full_text:
+            elif "toneden" in comb:
                 cat = "ToneDen Download Gate"
-            elif "bootleg" in title_lower or "flip" in title_lower:
+            elif "bootleg" in title.lower() or "flip" in title.lower():
                 cat = "Dubplate Bootleg / Flip"
 
             item = {
                 "source": "SoundCloud",
-                "artist": name,
-                "title": track_title,
-                "url": track_url,
-                "category": cat
+                "artist": artist,
+                "title": title,
+                "url": permalink,
+                "category": cat,
+                "dl_gate": purchase_url if has_gate else permalink
             }
-            self.seen_urls.add(track_url)
+            self.seen_urls.add(permalink)
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW FREE SC DUB: {name} - {track_title}")
+            logger.info(f"[*] NEW FREE DUB FOUND: {artist} - {title} ({permalink})")
 
-    # --- Strict Bandcamp Scanner ---
-    def scan_bandcamp_label(self, name, sub):
-        base_url = f"https://{sub}.bandcamp.com"
-        music_url = f"{base_url}/music"
-        html_text = self.fetch(music_url) or self.fetch(base_url)
-        if not html_text:
+    # --- Bandcamp Global Tag Hub Search ---
+    def search_bandcamp_tags(self, hub_url):
+        logger.info(f"Auditing Bandcamp Tag Hub: {hub_url}")
+        time.sleep(self.delay)
+        try:
+            resp = self.session.get(hub_url, timeout=15)
+            if resp.status_code != 200:
+                return
+            soup = BeautifulSoup(resp.text, "html.parser")
+        except Exception:
             return
 
-        soup = BeautifulSoup(html_text, "html.parser")
-        grid = soup.find(id="music-grid") or soup
         candidate_urls = []
-        for a in grid.find_all("a", href=True):
-            h = a["href"]
-            if "/album/" in h or "/track/" in h:
-                u = urljoin(base_url, h).split("?")[0]
-                if u not in self.seen_urls and u not in candidate_urls:
-                    candidate_urls.append(u)
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if ("/album/" in href or "/track/" in href) and ".bandcamp.com" in href:
+                clean = href.split("?")[0]
+                if clean not in self.seen_urls and clean not in candidate_urls:
+                    candidate_urls.append(clean)
 
-        for u in candidate_urls[:6]:
-            self.inspect_bandcamp_release(u, name)
+        for u in candidate_urls[:8]:
+            self.inspect_bandcamp_release(u)
 
-    def inspect_bandcamp_release(self, url, label):
-        txt = self.fetch(url)
-        if not txt:
+    def inspect_bandcamp_release(self, url):
+        time.sleep(self.delay)
+        try:
+            resp = self.session.get(url, timeout=15)
+            if resp.status_code != 200:
+                return
+            txt = resp.text
+        except Exception:
             return
         self.seen_urls.add(url)
 
-        # 1. Anti-Merch / Anti-Vinyl check
-        url_lower = url.lower()
-        if any(term in url_lower for term in ["vinyl", "preorder", "pre-order"]):
+        if any(term in url.lower() for term in ["vinyl", "preorder", "pre-order"]):
             return
 
-        # 2. Check TralbumData & Dates
         is_nyp = False
         m = re.search(r'data-tralbum="([^"]+)"', txt)
         tr = json.loads(html.unescape(m.group(1))) if m else None
-        
-        # Freshness Check (Bandcamp datePublished or publish_date)
+
+        # Freshness Check
         pub_date = None
         if tr:
             cur = tr.get("current", {})
@@ -266,19 +233,14 @@ class DubplateMonitor:
                 except Exception:
                     pass
 
-        # If release is older than MAX_AGE_DAYS, REJECT immediately
-        if pub_date:
-            age = (datetime.now() - pub_date).days
-            if age > MAX_AGE_DAYS:
-                return
+        if pub_date and (datetime.now() - pub_date).days > MAX_AGE_DAYS:
+            return
 
-        # 3. Check for NYP
         if tr:
             cur = tr.get("current", {})
             title = cur.get("title", "")
             if any(neg in title.lower() for neg in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
                 return
-
             if cur.get("download_pref") == 1 or cur.get("min_price") == 0 or cur.get("freeDownloadPage"):
                 is_nyp = True
             for t in tr.get("trackinfo", []):
@@ -293,69 +255,90 @@ class DubplateMonitor:
 
         if is_nyp:
             title = (tr.get("current", {}).get("title") if tr else "") or "Unknown Title"
-            artist = (tr.get("artist") if tr else "") or label
+            artist = (tr.get("artist") if tr else "") or "Underground Artist"
             item = {
                 "source": "Bandcamp",
                 "artist": artist,
                 "title": title,
                 "url": url,
-                "category": "Name Your Price / Free"
+                "category": "Name Your Price / Free",
+                "dl_gate": url
             }
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title}")
+            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title} ({url})")
 
-    # --- Discord Webhook Notification ---
     @staticmethod
-    def send_to_discord(webhook_url, item):
+    def send_to_discord(webhook_url, payload):
         if not webhook_url:
             return
-        color = 0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3
-        payload = {
-            "embeds": [{
-                "title": f"🔊 {item['title'][:250]}",
-                "url": item["url"],
-                "color": color,
-                "fields": [
-                    {"name": "Artist / Channel", "value": item["artist"], "inline": True},
-                    {"name": "Platform", "value": item["source"], "inline": True},
-                    {"name": "Category", "value": item["category"], "inline": True}
-                ],
-                "footer": {"text": "140 Dubplate Monitor • Fresh Free Drop"},
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }]
-        }
         try:
             import requests as req
-            resp = req.post(webhook_url, json=payload, timeout=10)
+            req.post(webhook_url, json=payload, timeout=10)
             time.sleep(0.5)
         except Exception as e:
             logger.error(f"Failed to post to Discord: {e}")
 
     def run(self):
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+        is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
         print("\n" + "=" * 75)
-        print("  140 & DUBSTEP DUBPLATE MONITOR (STRICT FREE & FRESH)")
+        print("  TAG-DRIVEN 140 DUBPLATE & NYP DISCOVERY (GLOBAL)")
         print("=" * 75)
-        print(f"[*] Freshness Threshold: Last {MAX_AGE_DAYS} Days (Filtering out old catalogs & vinyl pre-orders)")
-        print(f"[*] Auditing {len(SOUNDCLOUD_PRODUCERS)} Producers + {len(SOUNDCLOUD_COLLECTIVES)} Channels on SoundCloud...")
+        print(f"[*] Strategy: Global 140 / Deep Dubstep / Sound System Tag Queries")
+        print(f"[*] Window: Past {MAX_AGE_DAYS} Days (Fresh digital releases only)")
 
-        for name, url in SOUNDCLOUD_PRODUCERS + SOUNDCLOUD_COLLECTIVES:
-            self.scan_soundcloud_channel(name, url)
+        # 1. Search SoundCloud via Tag Queries
+        for q in SC_TAG_QUERIES:
+            self.search_soundcloud_tags(q, limit=20)
 
-        print(f"\n[*] Auditing {len(BANDCAMP_NETLABELS)} Bandcamp Netlabels...")
-        for name, sub in BANDCAMP_NETLABELS:
-            self.scan_bandcamp_label(name, sub)
+        # 2. Search Bandcamp Tag Hubs
+        for hub in BC_TAG_HUBS:
+            self.search_bandcamp_tags(hub)
 
         self.save_history()
 
-        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} verified fresh free releases.")
-        if webhook_url and self.new_discoveries:
-            print(f"[*] Dispatching {len(self.new_discoveries)} alerts to Discord...")
-            for item in self.new_discoveries:
-                self.send_to_discord(webhook_url, item)
+        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} new 140 dubs.")
+
+        if webhook_url:
+            if self.new_discoveries:
+                print(f"[*] Dispatching {len(self.new_discoveries)} releases to Discord...")
+                for item in self.new_discoveries:
+                    color = 0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3
+                    fields = [
+                        {"name": "Artist", "value": item["artist"][:100], "inline": True},
+                        {"name": "Platform", "value": item["source"], "inline": True},
+                        {"name": "Category", "value": item["category"], "inline": True}
+                    ]
+                    if item.get("dl_gate") and item["dl_gate"] != item["url"]:
+                        fields.append({"name": "Download Gate", "value": f"[Direct Download]({item['dl_gate']})", "inline": False})
+
+                    payload = {
+                        "embeds": [{
+                            "title": f"🔊 {item['title'][:250]}",
+                            "url": item["url"],
+                            "color": color,
+                            "fields": fields,
+                            "footer": {"text": "140 Dubplate Discovery • Fresh Free Drop"},
+                            "timestamp": datetime.utcnow().isoformat() + "Z"
+                        }]
+                    }
+                    self.send_to_discord(webhook_url, payload)
+            elif is_manual:
+                print("[*] Sending manual check status to Discord...")
+                status = {
+                    "embeds": [{
+                        "title": "🟢 140 Dubplate Scanner: Tag Search Active",
+                        "description": "Scanned global 140 & deep dubstep tags on SoundCloud and Bandcamp.\n\n**Result:** No brand-new free dubplates uploaded in the last window.\n*Standing by for new drops.*",
+                        "color": 0x2ecc71,
+                        "footer": {"text": "Automated check every 6 hours"},
+                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                    }]
+                }
+                self.send_to_discord(webhook_url, status)
 
 
 if __name__ == "__main__":
-    monitor = DubplateMonitor()
-    monitor.run()
+    scanner = TagDrivenScanner()
+    scanner.run()
+
