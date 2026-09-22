@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Deep-Digging 140 & Dubstep Free Dubplate Scanner (V5 - Expanded Search Depth)
-============================================================================
-Pulls deeper batches of unreleased dubplates, bootlegs, edits, and NYP releases
-by expanding query variety and searching 50+ results per query.
+Hybrid 140 Dubplate Scanner (Pillars of the Culture + Global Tag Discovery)
+===========================================================================
+Combines:
+1. Direct feeds for 37 Pillars of Sound System Culture (Ternion Sound,
+   The Widdler, Distinct Motive, Chef Boyarbeatz, Alix Perez, Hamdi, Truth, etc.)
+2. Global Tag Harvester across all rising underground beatmakers on SoundCloud & Bandcamp.
+3. Color-Coded Discord Embeds:
+   - 👑 Gold Embeds for '👑 Pillar Drop' (Scene leaders)
+   - 🌐 Flame/Cyan Embeds for '🌐 Underground Discovery' (Rising talent)
 """
 
 import os
@@ -25,9 +30,78 @@ except ImportError:
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-logger = logging.getLogger("140DeepScanner")
+logger = logging.getLogger("140HybridScanner")
 
-# Expanded 16-Query Arsenal covering all 140 sub-genres and dub styles
+# --- ENGINE 1: 37 PILLARS OF SOUND SYSTEM CULTURE (DIRECT FEEDS) ---
+PILLAR_SOUNDCLOUD = [
+    ("Ternion Sound", "https://soundcloud.com/ternionsound/tracks"),
+    ("The Widdler", "https://soundcloud.com/the_widdler/tracks"),
+    ("Distinct Motive", "https://soundcloud.com/distinctmotive/tracks"),
+    ("Chef Boyarbeatz", "https://soundcloud.com/chef_boyarbeatz/tracks"),
+    ("Alix Perez", "https://soundcloud.com/alixperez/tracks"),
+    ("Hamdi", "https://soundcloud.com/hamdimusic/tracks"),
+    ("Truth", "https://soundcloud.com/truthdubstep/tracks"),
+    ("Deep Dark and Dangerous", "https://soundcloud.com/deepdarkanddangerous/tracks"),
+    ("Khiva", "https://soundcloud.com/khiva/tracks"),
+    ("Pushloop", "https://soundcloud.com/pushloop/tracks"),
+    ("Bukez Finezt", "https://soundcloud.com/bukezfinezt/tracks"),
+    ("Commodo", "https://soundcloud.com/commodo/tracks"),
+    ("Sir Hiss", "https://soundcloud.com/sirhiss/tracks"),
+    ("Drone", "https://soundcloud.com/dronemusic/tracks"),
+    ("Sleeper", "https://soundcloud.com/sleeper/tracks"),
+    ("J:Kenzo", "https://soundcloud.com/jkenzo/tracks"),
+    ("Chad Dubz", "https://soundcloud.com/chaddubz/tracks"),
+    ("Kercha", "https://soundcloud.com/kercha/tracks"),
+    ("Taiko", "https://soundcloud.com/taikouk/tracks"),
+    ("Enigma Dubz", "https://soundcloud.com/enigmadubz/tracks"),
+    ("Mikrodot", "https://soundcloud.com/mikrodot/tracks"),
+    ("Cimm", "https://soundcloud.com/cimm/tracks"),
+    ("Sepia", "https://soundcloud.com/sepia/tracks"),
+    ("Cartridge", "https://soundcloud.com/cartridgedub/tracks"),
+    ("Wraz", "https://soundcloud.com/wraz/tracks"),
+    ("Criso", "https://soundcloud.com/crisosound/tracks"),
+    ("Dalek One", "https://soundcloud.com/dalekone/tracks"),
+    ("Basura", "https://soundcloud.com/basuradub/tracks"),
+    ("11th Hour", "https://soundcloud.com/11th_hour/tracks"),
+    ("Sub Basics", "https://soundcloud.com/sub-basics/tracks"),
+    ("Stance Audio", "https://soundcloud.com/stanceaudio/tracks"),
+    ("Infernal Sounds", "https://soundcloud.com/infernalsounds/tracks"),
+    ("WiddFam", "https://soundcloud.com/widdfam/tracks"),
+    ("FatKidOnFire", "https://soundcloud.com/fatkidonfire/tracks"),
+    ("Honey & Bass", "https://soundcloud.com/honeyandbass/tracks"),
+    ("DUPLOC", "https://soundcloud.com/duploc/tracks"),
+    ("Dank 'N' Dirty Dubz", "https://soundcloud.com/dankndirtydubz/tracks")
+]
+
+PILLAR_BANDCAMP = [
+    ("Ternion Sound", "ternionsound"),
+    ("The Widdler", "the-widdler"),
+    ("Chef Boyarbeatz", "chefboyarbeatz"),
+    ("Distinct Motive", "distinctmotive"),
+    ("Hamdi", "hamdimusic"),
+    ("Truth", "truthdubstep"),
+    ("Deep Dark and Dangerous", "deepdarkanddangerous"),
+    ("Khiva", "khiva"),
+    ("Pushloop", "pushloop"),
+    ("Bukez Finezt", "bukezfinezt"),
+    ("Alix Perez", "alixperez"),
+    ("Sleeper", "sleeper"),
+    ("J:Kenzo", "jkenzo"),
+    ("Chad Dubz", "chaddubz"),
+    ("Kercha", "kercha"),
+    ("Taiko", "taikouk"),
+    ("DUPLOC", "duploc"),
+    ("White Peach Records", "whitepeachrecords"),
+    ("Infernal Sounds", "infernalsounds"),
+    ("WiddFam", "widdfam"),
+    ("FatKidOnFire", "fatkidonfire"),
+    ("Dank 'N' Dirty Dubz", "dankndirtydubz"),
+    ("Cimmerian Records", "cimmerianrecords"),
+    ("Honey & Bass", "honeyandbass"),
+    ("Foundation Audio", "foundationaudio")
+]
+
+# --- ENGINE 2: GLOBAL TAG & STYLE QUERIES (DISCOVERY) ---
 SC_TAG_QUERIES = [
     '140 "free dl"',
     'deep dubstep "free dl"',
@@ -47,7 +121,6 @@ SC_TAG_QUERIES = [
     'sound system dub "free dl"'
 ]
 
-# Expanded Bandcamp Tag Discovery Hubs
 BC_TAG_HUBS = [
     "https://bandcamp.com/tag/140",
     "https://bandcamp.com/tag/deep-dubstep",
@@ -57,7 +130,7 @@ BC_TAG_HUBS = [
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 60  # Generous 2-month window for deep dubs
+MAX_AGE_DAYS = 60  # 2-month freshness limit
 
 FALLBACK_CLIENT_IDS = [
     "iZIs9mchVcX5lhVR1EzGCcyEVAazo9J4",
@@ -66,7 +139,7 @@ FALLBACK_CLIENT_IDS = [
 ]
 
 
-class DeepTagScanner:
+class HybridScanner:
     def __init__(self, delay=1.0):
         self.delay = delay
         self.seen_urls = self.load_history()
@@ -109,10 +182,100 @@ class DeepTagScanner:
             pass
         return FALLBACK_CLIENT_IDS[0]
 
-    def search_soundcloud_tags(self, query, limit=50):
-        logger.info(f"Searching SoundCloud: '{query}' (Depth: {limit})")
-        search_url = f"https://api-v2.soundcloud.com/search/tracks?q={quote_plus(query)}&client_id={self.sc_client_id}&limit={limit}&access=playable"
+    def is_pillar_artist(self, artist_name, url):
+        combined = f"{artist_name} {url}".lower()
+        for name, _ in PILLAR_SOUNDCLOUD + [(n, f"https://{s}.bandcamp.com") for n, s in PILLAR_BANDCAMP]:
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
+            if clean_name in re.sub(r'[^a-zA-Z0-9]', '', combined):
+                return True, name
+        return False, artist_name
 
+    # --- Engine 1: Dedicated SoundCloud Channel Auditor ---
+    def scan_soundcloud_channel(self, name, url):
+        time.sleep(self.delay)
+        try:
+            r = self.session.get(url, timeout=15)
+            if r.status_code != 200:
+                return
+            raw_html = r.text
+        except Exception:
+            return
+
+        soup = BeautifulSoup(raw_html, "html.parser")
+        articles = soup.find_all("article")
+        reserved = ("tracks", "albums", "sets", "reposts", "followers", "following", "popular-tracks", "comments")
+
+        for art in articles:
+            track_url = None
+            track_title = None
+            for a in art.find_all("a", href=True):
+                href = a["href"].split("?")[0].strip()
+                parts = [p for p in href.strip("/").split("/") if p]
+                if len(parts) == 2 and parts[1].lower() not in reserved:
+                    track_url = f"https://soundcloud.com/{parts[0]}/{parts[1]}"
+                    track_title = a.get_text(strip=True)
+                    break
+
+            if not track_url or not track_title or track_url in self.seen_urls:
+                continue
+
+            full_text = art.get_text(separator=" ").lower()
+            title_lower = track_title.lower()
+
+            if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
+                continue
+
+            is_old = False
+            time_el = art.find("time")
+            if time_el:
+                dt_str = time_el.get("datetime")
+                if dt_str:
+                    try:
+                        pub = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                        if (self.now - pub).days > MAX_AGE_DAYS:
+                            is_old = True
+                    except Exception:
+                        pass
+                t_text = time_el.get_text().lower()
+                if re.search(r'(\d+\s*year|\d+y\b)', t_text):
+                    is_old = True
+                m = re.search(r'(\d+)\s*month', t_text)
+                if m and int(m.group(1)) > 2:
+                    is_old = True
+
+            if is_old:
+                continue
+
+            has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', full_text))
+            has_free_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg|free\s*vip|free\s*edit)', title_lower))
+
+            if not (has_gate or has_free_title):
+                continue
+
+            cat = "Direct Free Download"
+            if "hypeddit" in full_text:
+                cat = "Hypeddit Download Gate"
+            elif "toneden" in full_text:
+                cat = "ToneDen Download Gate"
+            elif "bootleg" in title_lower or "flip" in title_lower or "edit" in title_lower:
+                cat = "Dubplate Edit / Bootleg"
+
+            item = {
+                "source": "SoundCloud",
+                "artist": name,
+                "title": track_title,
+                "url": track_url,
+                "category": cat,
+                "tier": f"👑 Pillar Drop • {name}",
+                "dl_gate": track_url
+            }
+            self.seen_urls.add(track_url)
+            self.new_discoveries.append(item)
+            logger.info(f"[*] 👑 PILLAR SC DROP: {name} - {track_title}")
+
+    # --- Engine 2: Global SoundCloud Tag Search ---
+    def search_soundcloud_tags(self, query, limit=40):
+        search_url = f"https://api-v2.soundcloud.com/search/tracks?q={quote_plus(query)}&client_id={self.sc_client_id}&limit={limit}&access=playable"
         time.sleep(self.delay)
         try:
             resp = self.session.get(search_url, timeout=15)
@@ -151,7 +314,10 @@ class DeepTagScanner:
             if not (downloadable or has_gate or has_free_title):
                 continue
 
-            artist = tr.get("user", {}).get("username", "Underground Producer")
+            raw_artist = tr.get("user", {}).get("username", "Underground Producer")
+            is_pillar, pillar_name = self.is_pillar_artist(raw_artist, permalink)
+            tier_label = f"👑 Pillar Drop • {pillar_name}" if is_pillar else f"🌐 Underground Discovery • {raw_artist}"
+
             cat = "Direct Free Download"
             if "hypeddit" in comb:
                 cat = "Hypeddit Download Gate"
@@ -164,18 +330,45 @@ class DeepTagScanner:
 
             item = {
                 "source": "SoundCloud",
-                "artist": artist,
+                "artist": raw_artist,
                 "title": title,
                 "url": permalink,
                 "category": cat,
+                "tier": tier_label,
                 "dl_gate": purchase_url if has_gate else permalink
             }
             self.seen_urls.add(permalink)
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW DEEP DUB: {artist} - {title}")
+            logger.info(f"[*] NEW DISCOVERY: {raw_artist} - {title}")
+
+    # --- Bandcamp Engine (Pillars + Tag Hubs) ---
+    def scan_bandcamp_discog(self, name, sub, limit=6):
+        base_url = f"https://{sub}.bandcamp.com"
+        time.sleep(self.delay)
+        try:
+            r = self.session.get(f"{base_url}/music", timeout=15)
+            if r.status_code != 200:
+                r = self.session.get(base_url, timeout=15)
+            if r.status_code != 200:
+                return
+            txt = r.text
+        except Exception:
+            return
+
+        soup = BeautifulSoup(txt, "html.parser")
+        grid = soup.find(id="music-grid") or soup
+        candidate_urls = []
+        for a in grid.find_all("a", href=True):
+            h = a["href"]
+            if "/album/" in h or "/track/" in h:
+                u = urljoin(base_url, h).split("?")[0]
+                if u not in self.seen_urls and u not in candidate_urls:
+                    candidate_urls.append(u)
+
+        for u in candidate_urls[:limit]:
+            self.inspect_bandcamp_release(u, name, is_pillar_source=True)
 
     def search_bandcamp_tags(self, hub_url):
-        logger.info(f"Auditing Bandcamp Tag Hub: {hub_url}")
         time.sleep(self.delay)
         try:
             resp = self.session.get(hub_url, timeout=15)
@@ -193,10 +386,10 @@ class DeepTagScanner:
                 if clean not in self.seen_urls and clean not in candidate_urls:
                     candidate_urls.append(clean)
 
-        for u in candidate_urls[:12]:
-            self.inspect_bandcamp_release(u)
+        for u in candidate_urls[:10]:
+            self.inspect_bandcamp_release(u, "Underground Artist", is_pillar_source=False)
 
-    def inspect_bandcamp_release(self, url):
+    def inspect_bandcamp_release(self, url, label, is_pillar_source=False):
         time.sleep(self.delay)
         try:
             resp = self.session.get(url, timeout=15)
@@ -255,17 +448,21 @@ class DeepTagScanner:
 
         if is_nyp:
             title = (tr.get("current", {}).get("title") if tr else "") or "Unknown Title"
-            artist = (tr.get("artist") if tr else "") or "Underground Artist"
+            artist = (tr.get("artist") if tr else "") or label
+            is_pillar, pillar_name = self.is_pillar_artist(artist, url)
+            tier_label = f"👑 Pillar Drop • {pillar_name}" if (is_pillar or is_pillar_source) else f"🌐 Underground Discovery • {artist}"
+
             item = {
                 "source": "Bandcamp",
                 "artist": artist,
                 "title": title,
                 "url": url,
                 "category": "Name Your Price / Free",
+                "tier": tier_label,
                 "dl_gate": url
             }
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title}")
+            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title} ({url})")
 
     @staticmethod
     def send_to_discord(webhook_url, payload):
@@ -282,34 +479,44 @@ class DeepTagScanner:
         webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
         is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
-        print("\n" + "=" * 75)
-        print("  DEEP-DIGGING 140 DUBPLATE & NYP DISCOVERY (GLOBAL)")
-        print("=" * 75)
-        print(f"[*] Search Scope: 16 Global Queries x 50 Results Deep")
-        print(f"[*] Freshness Limit: Past {MAX_AGE_DAYS} Days")
+        print("\n" + "=" * 78)
+        print("  140 SOUND SYSTEM DUBPLATE MONITOR (PILLARS + GLOBAL DISCOVERY)")
+        print("=" * 78)
 
+        # 1. Audit Pillar Artists on SoundCloud
+        print(f"[*] Auditing {len(PILLAR_SOUNDCLOUD)} Sound System Culture Pillars...")
+        for name, url in PILLAR_SOUNDCLOUD:
+            self.scan_soundcloud_channel(name, url)
+
+        # 2. Audit Pillar Netlabels on Bandcamp
+        print(f"[*] Auditing {len(PILLAR_BANDCAMP)} Pillar Imprints on Bandcamp...")
+        for name, sub in PILLAR_BANDCAMP:
+            self.scan_bandcamp_discog(name, sub)
+
+        # 3. Global Tag Harvest across all underground producers
+        print(f"[*] Running Global 140 Tag Harvest ({len(SC_TAG_QUERIES)} queries x 40 depth)...")
         for q in SC_TAG_QUERIES:
-            self.search_soundcloud_tags(q, limit=50)
+            self.search_soundcloud_tags(q, limit=40)
 
         for hub in BC_TAG_HUBS:
             self.search_bandcamp_tags(hub)
 
         self.save_history()
 
-        print(f"\n[+] Scan finished! Discovered {len(self.new_discoveries)} new 140 dubs.")
+        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} new 140 dubplates & NYP drops.")
 
         if webhook_url:
             if self.new_discoveries:
-                print(f"[*] Dispatching {len(self.new_discoveries)} new releases to Discord...")
+                print(f"[*] Dispatching {len(self.new_discoveries)} alerts to Discord...")
                 for item in self.new_discoveries:
-                    color = 0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3
+                    color = 0xffd700 if "👑" in item["tier"] else (0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3)
                     fields = [
-                        {"name": "Artist", "value": item["artist"][:100], "inline": True},
+                        {"name": "Tier / Category", "value": item["tier"], "inline": False},
                         {"name": "Platform", "value": item["source"], "inline": True},
-                        {"name": "Category", "value": item["category"], "inline": True}
+                        {"name": "Download Type", "value": item["category"], "inline": True}
                     ]
                     if item.get("dl_gate") and item["dl_gate"] != item["url"]:
-                        fields.append({"name": "Download Gate", "value": f"[Direct Download]({item['dl_gate']})", "inline": False})
+                        fields.append({"name": "Direct Download Gate", "value": f"[Get Track via Hypeddit / ToneDen]({item['dl_gate']})", "inline": False})
 
                     payload = {
                         "embeds": [{
@@ -317,7 +524,7 @@ class DeepTagScanner:
                             "url": item["url"],
                             "color": color,
                             "fields": fields,
-                            "footer": {"text": "140 Dubplate Discovery • Fresh Free Drop"},
+                            "footer": {"text": "140 Sound System Dubplate Monitor"},
                             "timestamp": datetime.utcnow().isoformat() + "Z"
                         }]
                     }
@@ -326,8 +533,8 @@ class DeepTagScanner:
                 print("[*] Sending manual check status to Discord...")
                 status = {
                     "embeds": [{
-                        "title": "🟢 140 Dubplate Scanner: Deep Scan Active",
-                        "description": "Scanned 16 queries at 50-track depth.\n\n**Result:** No new unreleased dubplates beyond what is already in your feed.\n*Monitoring for the next upload.*",
+                        "title": "🟢 140 Dubplate Monitor: Fully Synced",
+                        "description": f"Audited **{len(PILLAR_SOUNDCLOUD)} Pillar Artists** + **Global 140 Tag Harvest**.\n\n**Status:** No brand-new unreleased dubs beyond your current feed.\n*Monitoring for fresh drops.*",
                         "color": 0x2ecc71,
                         "footer": {"text": "Automated schedule active every 6 hours"},
                         "timestamp": datetime.utcnow().isoformat() + "Z"
@@ -337,5 +544,6 @@ class DeepTagScanner:
 
 
 if __name__ == "__main__":
-    scanner = DeepTagScanner()
+    scanner = HybridScanner()
     scanner.run()
+
