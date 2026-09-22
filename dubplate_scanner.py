@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated 140 & Dubstep Dubplate Scanner (V4 - Instant Feedback & Smart Dedup)
+Automated 140 & Dubstep Dubplate Scanner (V5 - Strict Date Validation)
 """
 
 import os
@@ -75,14 +75,13 @@ BANDCAMP_NETLABELS = [
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 90  # 3-month window for dubplates
+MAX_AGE_DAYS = 90  # 90-day window for dubplates
 
 MERCH_BLOCKLIST = [
     "vinyl", "pre-order", "preorder", "pre order", "12\"", "7\"",
     "lathe cut", "cassette", "tape", "merch", "t-shirt", "hoodie",
     "shipping", "buy now", "out now on", "forthcoming on"
 ]
-
 
 class DubplateMonitor:
     def __init__(self, delay=1.0):
@@ -148,13 +147,11 @@ class DubplateMonitor:
             full_text = art.get_text(separator=" ").lower()
             title_lower = track_title.lower()
 
-            # Reject vinyl/merch
             if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
                 continue
             if any(term in full_text for term in MERCH_BLOCKLIST) and not any(f in title_lower for f in ["[free dl]", "(free dl)", "free download"]):
                 continue
 
-            # Check age
             is_old = False
             time_el = art.find("time")
             if time_el:
@@ -165,20 +162,17 @@ class DubplateMonitor:
                         if (self.now - pub_date).days > MAX_AGE_DAYS:
                             is_old = True
                     except Exception:
-                        pass
-                t_text = time_el.get_text().lower()
-                if re.search(r'(\d+\s*year|\d+y\b)', t_text):
-                    is_old = True
-                m = re.search(r'(\d+)\s*month', t_text)
-                if m and int(m.group(1)) > 3:
-                    is_old = True
+                        is_old = True  # Reject if date parsing fails
+                else:
+                    is_old = True  # Reject if no datetime attribute found
+            else:
+                is_old = True  # Reject if time element is missing
 
             if is_old:
                 continue
 
-            # Free DL verification
             has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', full_text))
-            has_free_in_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title_lower))
+            has_free_in_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title_lower))
 
             if not (has_gate or has_free_in_title):
                 continue
@@ -243,19 +237,24 @@ class DubplateMonitor:
                 try:
                     clean_d = re.sub(r'\s+[A-Z]{3,4}$', '', raw_date).strip()
                     pub_date = datetime.strptime(clean_d[:20].strip(), "%d %b %Y %H:%M:%S")
+                    pub_date = pub_date.replace(tzinfo=timezone.utc)
                 except Exception:
-                    pass
+                    pub_date = None
 
         if not pub_date:
             m_date = re.search(r'itemprop="datePublished"\s+content="([^"]+)"', txt)
             if m_date:
                 try:
                     pub_date = datetime.fromisoformat(m_date.group(1).split("T")[0])
+                    pub_date = pub_date.replace(tzinfo=timezone.utc)
                 except Exception:
-                    pass
+                    pub_date = None
 
-        if pub_date and (datetime.now() - pub_date).days > MAX_AGE_DAYS:
-            return
+        if pub_date:
+            if (self.now - pub_date).days > MAX_AGE_DAYS:
+                return
+        else:
+            return  # Reject if date can't be confirmed
 
         if tr:
             cur = tr.get("current", {})
@@ -303,7 +302,7 @@ class DubplateMonitor:
         is_manual_trigger = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
         print("\n" + "=" * 75)
-        print("  140 DUBPLATE MONITOR (V4 - LIVE STATUS & DEDUP)")
+        print("  140 DUBPLATE MONITOR (V5 - STRICT DATE VALIDATION)")
         print("=" * 75)
         print(f"[*] Trigger Mode: {'Manual (Phone Dispatch)' if is_manual_trigger else 'Automated Schedule'}")
         print(f"[*] Auditing {len(SOUNDCLOUD_PRODUCERS)} Producers + {len(SOUNDCLOUD_COLLECTIVES)} Channels on SoundCloud...")
