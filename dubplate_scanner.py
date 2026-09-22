@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """
-Hybrid 140 Dubplate Scanner (Pillars of the Culture + Global Tag Discovery)
-===========================================================================
-Combines:
-1. Direct feeds for 37 Pillars of Sound System Culture (Ternion Sound,
-   The Widdler, Distinct Motive, Chef Boyarbeatz, Alix Perez, Hamdi, Truth, etc.)
-2. Global Tag Harvester across all rising underground beatmakers on SoundCloud & Bandcamp.
-3. Color-Coded Discord Embeds:
-   - 👑 Gold Embeds for '👑 Pillar Drop' (Scene leaders)
-   - 🌐 Flame/Cyan Embeds for '🌐 Underground Discovery' (Rising talent)
+Hybrid 140 Dubplate Scanner (Strict Anti-House & Dubstep Lockdown Edition)
+==========================================================================
+Eliminates 140 BPM Speed House, Bass House, 4x4, and Tech House edits by:
+1. Tethering all search queries strictly to 'dubstep', 'sound system', & 'dubplate'
+2. Inspecting SoundCloud's genre & tag_list with a strict House blocklist
+3. Maintaining direct feeds for 37 Sound System culture pillars
 """
 
 import os
@@ -30,9 +27,9 @@ except ImportError:
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-logger = logging.getLogger("140HybridScanner")
+logger = logging.getLogger("140LockdownScanner")
 
-# --- ENGINE 1: 37 PILLARS OF SOUND SYSTEM CULTURE (DIRECT FEEDS) ---
+# 37 PILLARS OF SOUND SYSTEM CULTURE (DIRECT FEEDS)
 PILLAR_SOUNDCLOUD = [
     ("Ternion Sound", "https://soundcloud.com/ternionsound/tracks"),
     ("The Widdler", "https://soundcloud.com/the_widdler/tracks"),
@@ -101,23 +98,22 @@ PILLAR_BANDCAMP = [
     ("Foundation Audio", "foundationaudio")
 ]
 
-# --- ENGINE 2: GLOBAL TAG & STYLE QUERIES (DISCOVERY) ---
+# TIGHTENED DUBSTEP-LOCKED QUERIES
 SC_TAG_QUERIES = [
-    '140 "free dl"',
+    '140 dubstep "free dl"',
     'deep dubstep "free dl"',
     '140 dubplate "free dl"',
-    '140 bootleg "free dl"',
-    '140 flip "free dl"',
-    '140 edit "free dl"',
+    '140 dubstep bootleg "free dl"',
+    '140 dubstep flip "free dl"',
+    '140 dubstep edit "free dl"',
     '140 dubpack "free"',
-    'sound system music "free dl"',
+    'sound system dubstep "free dl"',
     'deep 140 roller "free dl"',
-    '140 grime "free dl"',
-    '140 "free download"',
+    '140 dubstep "free download"',
     'deep dubstep "free download"',
-    '140 dubplate free',
+    '140 dubplate free download',
     'minimal dubstep "free dl"',
-    '140 vip "free dl"',
+    '140 dubstep vip "free dl"',
     'sound system dub "free dl"'
 ]
 
@@ -130,7 +126,21 @@ BC_TAG_HUBS = [
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 60  # 2-month freshness limit
+MAX_AGE_DAYS = 60
+
+# STRICT OFF-GENRE & MERCH BLOCKLISTS
+HOUSE_DISQUALIFIERS = [
+    r'\bhouse\b', r'\btech\s*house\b', r'\bbass\s*house\b', r'\bdeep\s*house\b',
+    r'\bspeed\s*house\b', r'\bstutter\s*house\b', r'\bafro\s*house\b', r'\belectro\s*house\b',
+    r'\bg-house\b', r'\b4x4\b', r'\bspeed\s*garage\b', r'\btechno\b', r'\btrance\b',
+    r'\bamapiano\b', r'\bhardstyle\b', r'\bpsytrance\b'
+]
+
+MERCH_BLOCKLIST = [
+    "vinyl", "pre-order", "preorder", "pre order", "12\"", "7\"",
+    "lathe cut", "cassette", "tape", "merch", "t-shirt", "hoodie",
+    "shipping", "buy now", "out now on", "forthcoming on"
+]
 
 FALLBACK_CLIENT_IDS = [
     "iZIs9mchVcX5lhVR1EzGCcyEVAazo9J4",
@@ -139,7 +149,7 @@ FALLBACK_CLIENT_IDS = [
 ]
 
 
-class HybridScanner:
+class LockdownScanner:
     def __init__(self, delay=1.0):
         self.delay = delay
         self.seen_urls = self.load_history()
@@ -182,6 +192,14 @@ class HybridScanner:
             pass
         return FALLBACK_CLIENT_IDS[0]
 
+    @staticmethod
+    def is_off_genre(title, genre, tag_list, description):
+        combined = f"{title} {genre} {tag_list} {description}".lower()
+        for pat in HOUSE_DISQUALIFIERS:
+            if re.search(pat, combined):
+                return True
+        return False
+
     def is_pillar_artist(self, artist_name, url):
         combined = f"{artist_name} {url}".lower()
         for name, _ in PILLAR_SOUNDCLOUD + [(n, f"https://{s}.bandcamp.com") for n, s in PILLAR_BANDCAMP]:
@@ -190,7 +208,6 @@ class HybridScanner:
                 return True, name
         return False, artist_name
 
-    # --- Engine 1: Dedicated SoundCloud Channel Auditor ---
     def scan_soundcloud_channel(self, name, url):
         time.sleep(self.delay)
         try:
@@ -223,6 +240,9 @@ class HybridScanner:
             title_lower = track_title.lower()
 
             if any(term in title_lower for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
+                continue
+
+            if self.is_off_genre(track_title, "", "", full_text):
                 continue
 
             is_old = False
@@ -273,7 +293,6 @@ class HybridScanner:
             self.new_discoveries.append(item)
             logger.info(f"[*] 👑 PILLAR SC DROP: {name} - {track_title}")
 
-    # --- Engine 2: Global SoundCloud Tag Search ---
     def search_soundcloud_tags(self, query, limit=40):
         search_url = f"https://api-v2.soundcloud.com/search/tracks?q={quote_plus(query)}&client_id={self.sc_client_id}&limit={limit}&access=playable"
         time.sleep(self.delay)
@@ -291,6 +310,14 @@ class HybridScanner:
             if not permalink or not title or permalink in self.seen_urls:
                 continue
 
+            genre = tr.get("genre") or ""
+            tag_list = tr.get("tag_list") or ""
+            desc = tr.get("description") or ""
+
+            # STRICT HOUSE & 4X4 BLOCKLIST
+            if self.is_off_genre(title, genre, tag_list, desc):
+                continue
+
             created_at = tr.get("created_at")
             if created_at:
                 try:
@@ -301,7 +328,6 @@ class HybridScanner:
                     pass
 
             purchase_url = tr.get("purchase_url") or ""
-            desc = tr.get("description") or ""
             comb = f"{title} {desc} {purchase_url}".lower()
 
             if any(term in comb for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
@@ -339,9 +365,8 @@ class HybridScanner:
             }
             self.seen_urls.add(permalink)
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW DISCOVERY: {raw_artist} - {title}")
+            logger.info(f"[*] NEW DUBSTEP DUB: {raw_artist} - {title}")
 
-    # --- Bandcamp Engine (Pillars + Tag Hubs) ---
     def scan_bandcamp_discog(self, name, sub, limit=6):
         base_url = f"https://{sub}.bandcamp.com"
         time.sleep(self.delay)
@@ -480,11 +505,11 @@ class HybridScanner:
         is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
         print("\n" + "=" * 78)
-        print("  140 SOUND SYSTEM DUBPLATE MONITOR (PILLARS + GLOBAL DISCOVERY)")
+        print("  140 DUBSTEP & SOUND SYSTEM MONITOR (ANTI-HOUSE STRICT LOCKDOWN)")
         print("=" * 78)
 
         # 1. Audit Pillar Artists on SoundCloud
-        print(f"[*] Auditing {len(PILLAR_SOUNDCLOUD)} Sound System Culture Pillars...")
+        print(f"[*] Auditing {len(PILLAR_SOUNDCLOUD)} Sound System Pillars on SoundCloud...")
         for name, url in PILLAR_SOUNDCLOUD:
             self.scan_soundcloud_channel(name, url)
 
@@ -493,8 +518,8 @@ class HybridScanner:
         for name, sub in PILLAR_BANDCAMP:
             self.scan_bandcamp_discog(name, sub)
 
-        # 3. Global Tag Harvest across all underground producers
-        print(f"[*] Running Global 140 Tag Harvest ({len(SC_TAG_QUERIES)} queries x 40 depth)...")
+        # 3. Dubstep-Locked Tag Harvest
+        print(f"[*] Running Dubstep-Locked Tag Harvest ({len(SC_TAG_QUERIES)} queries x 40 depth)...")
         for q in SC_TAG_QUERIES:
             self.search_soundcloud_tags(q, limit=40)
 
@@ -503,7 +528,7 @@ class HybridScanner:
 
         self.save_history()
 
-        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} new 140 dubplates & NYP drops.")
+        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} legit 140 dubstep releases.")
 
         if webhook_url:
             if self.new_discoveries:
@@ -524,7 +549,7 @@ class HybridScanner:
                             "url": item["url"],
                             "color": color,
                             "fields": fields,
-                            "footer": {"text": "140 Sound System Dubplate Monitor"},
+                            "footer": {"text": "140 Dubstep & Sound System Monitor"},
                             "timestamp": datetime.utcnow().isoformat() + "Z"
                         }]
                     }
@@ -533,8 +558,8 @@ class HybridScanner:
                 print("[*] Sending manual check status to Discord...")
                 status = {
                     "embeds": [{
-                        "title": "🟢 140 Dubplate Monitor: Fully Synced",
-                        "description": f"Audited **{len(PILLAR_SOUNDCLOUD)} Pillar Artists** + **Global 140 Tag Harvest**.\n\n**Status:** No brand-new unreleased dubs beyond your current feed.\n*Monitoring for fresh drops.*",
+                        "title": "🟢 140 Dubplate Monitor: Fully Synced (Anti-House Active)",
+                        "description": f"Audited **{len(PILLAR_SOUNDCLOUD)} Pillar Artists** + **Dubstep Tag Sweep**.\n\n**Status:** No brand-new unreleased dubs beyond your current feed.\n*Monitoring for fresh drops.*",
                         "color": 0x2ecc71,
                         "footer": {"text": "Automated schedule active every 6 hours"},
                         "timestamp": datetime.utcnow().isoformat() + "Z"
@@ -544,6 +569,5 @@ class HybridScanner:
 
 
 if __name__ == "__main__":
-    scanner = HybridScanner()
+    scanner = LockdownScanner()
     scanner.run()
-
