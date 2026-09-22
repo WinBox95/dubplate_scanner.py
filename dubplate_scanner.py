@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-Tag-Driven 140 & Dubstep Free Dubplate Scanner (Zero Artist Hardcoding)
-======================================================================
-Discovers fresh 140 sound system dubplates, bootlegs, and Name-Your-Price
-releases globally across SoundCloud and Bandcamp based strictly on:
-1. Genre & Style Tags (140, deep dubstep, sound system music, 140 dubplate, 140 flip)
-2. Verified Free Downloads & Download Gates (Hypeddit, ToneDen, direct DL, NYP)
-3. Freshness (Uploaded within the last 45 days)
-4. Anti-Merch Filter (Completely ignores vinyl, pre-orders, and physical merchandise)
+Deep-Digging 140 & Dubstep Free Dubplate Scanner (V5 - Expanded Search Depth)
+============================================================================
+Pulls deeper batches of unreleased dubplates, bootlegs, edits, and NYP releases
+by expanding query variety and searching 50+ results per query.
 """
 
 import os
@@ -29,29 +25,39 @@ except ImportError:
 from bs4 import BeautifulSoup
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-logger = logging.getLogger("140TagScanner")
+logger = logging.getLogger("140DeepScanner")
 
-# Global SoundCloud Tag & Style Queries
+# Expanded 16-Query Arsenal covering all 140 sub-genres and dub styles
 SC_TAG_QUERIES = [
     '140 "free dl"',
     'deep dubstep "free dl"',
     '140 dubplate "free dl"',
     '140 bootleg "free dl"',
+    '140 flip "free dl"',
+    '140 edit "free dl"',
+    '140 dubpack "free"',
+    'sound system music "free dl"',
+    'deep 140 roller "free dl"',
+    '140 grime "free dl"',
     '140 "free download"',
     'deep dubstep "free download"',
-    'sound system music "free dl"',
-    '140 flip "free dl"'
+    '140 dubplate free',
+    'minimal dubstep "free dl"',
+    '140 vip "free dl"',
+    'sound system dub "free dl"'
 ]
 
-# Bandcamp Tag Discovery Hubs
+# Expanded Bandcamp Tag Discovery Hubs
 BC_TAG_HUBS = [
     "https://bandcamp.com/tag/140",
     "https://bandcamp.com/tag/deep-dubstep",
-    "https://bandcamp.com/tag/sound-system-music"
+    "https://bandcamp.com/tag/sound-system-music",
+    "https://bandcamp.com/tag/140-bpm",
+    "https://bandcamp.com/tag/dubplate"
 ]
 
 HISTORY_FILE = "seen_dubs.json"
-MAX_AGE_DAYS = 45  # Freshness window (ignore anything older than 45 days)
+MAX_AGE_DAYS = 60  # Generous 2-month window for deep dubs
 
 FALLBACK_CLIENT_IDS = [
     "iZIs9mchVcX5lhVR1EzGCcyEVAazo9J4",
@@ -60,7 +66,7 @@ FALLBACK_CLIENT_IDS = [
 ]
 
 
-class TagDrivenScanner:
+class DeepTagScanner:
     def __init__(self, delay=1.0):
         self.delay = delay
         self.seen_urls = self.load_history()
@@ -68,7 +74,7 @@ class TagDrivenScanner:
         self.now = datetime.now(timezone.utc)
 
         if USE_CURL:
-            logger.info("Using curl_cffi with Chrome TLS impersonation.")
+            logger.info("Using curl_cffi Chrome TLS impersonation.")
             self.session = cffi_requests.Session(impersonate="chrome120")
         else:
             self.session = requests.Session()
@@ -98,15 +104,13 @@ class TagDrivenScanner:
                     s_resp = self.session.get(s_url, timeout=10)
                     m = re.search(r'client_id[:=]["\']([a-zA-Z0-9]{32})["\']', s_resp.text)
                     if m:
-                        logger.info(f"Dynamically extracted SoundCloud client_id: {m.group(1)[:8]}...")
                         return m.group(1)
         except Exception:
             pass
         return FALLBACK_CLIENT_IDS[0]
 
-    # --- Global SoundCloud Search via Tags & Free DL Filters ---
-    def search_soundcloud_tags(self, query, limit=20):
-        logger.info(f"Searching SoundCloud for: '{query}'")
+    def search_soundcloud_tags(self, query, limit=50):
+        logger.info(f"Searching SoundCloud: '{query}' (Depth: {limit})")
         search_url = f"https://api-v2.soundcloud.com/search/tracks?q={quote_plus(query)}&client_id={self.sc_client_id}&limit={limit}&access=playable"
 
         time.sleep(self.delay)
@@ -114,10 +118,8 @@ class TagDrivenScanner:
             resp = self.session.get(search_url, timeout=15)
             if resp.status_code != 200:
                 return
-            data = resp.json()
-            tracks = data.get("collection", [])
-        except Exception as e:
-            logger.debug(f"SoundCloud search error: {e}")
+            tracks = resp.json().get("collection", [])
+        except Exception:
             return
 
         for tr in tracks:
@@ -126,7 +128,6 @@ class TagDrivenScanner:
             if not permalink or not title or permalink in self.seen_urls:
                 continue
 
-            # 1. Freshness Filter
             created_at = tr.get("created_at")
             if created_at:
                 try:
@@ -136,17 +137,16 @@ class TagDrivenScanner:
                 except Exception:
                     pass
 
-            # 2. Anti-Merch / Anti-Vinyl Check
             purchase_url = tr.get("purchase_url") or ""
             desc = tr.get("description") or ""
             comb = f"{title} {desc} {purchase_url}".lower()
+
             if any(term in comb for term in ["vinyl", "pre-order", "preorder", "12\"", "cassette"]):
                 continue
 
-            # 3. Verified Free DL / Download Gate
             downloadable = tr.get("downloadable", False)
             has_gate = bool(re.search(r'(hypeddit\.com|toneden\.io|theartistunion\.com|mediafire\.com|dropbox\.com)', comb))
-            has_free_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg)', title.lower()))
+            has_free_title = bool(re.search(r'(\[free\s*dl\]|\(free\s*dl\)|free\s*dl\b|\[free\s*download\]|\(free\s*download\)|free\s*download\b|free\s*flip|free\s*bootleg|free\s*edit|dubpack)', title.lower()))
 
             if not (downloadable or has_gate or has_free_title):
                 continue
@@ -157,8 +157,10 @@ class TagDrivenScanner:
                 cat = "Hypeddit Download Gate"
             elif "toneden" in comb:
                 cat = "ToneDen Download Gate"
-            elif "bootleg" in title.lower() or "flip" in title.lower():
-                cat = "Dubplate Bootleg / Flip"
+            elif "bootleg" in title.lower() or "flip" in title.lower() or "edit" in title.lower():
+                cat = "Dubplate Edit / Bootleg"
+            elif "dubpack" in title.lower():
+                cat = "Free 140 Dubpack"
 
             item = {
                 "source": "SoundCloud",
@@ -170,9 +172,8 @@ class TagDrivenScanner:
             }
             self.seen_urls.add(permalink)
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW FREE DUB FOUND: {artist} - {title} ({permalink})")
+            logger.info(f"[*] NEW DEEP DUB: {artist} - {title}")
 
-    # --- Bandcamp Global Tag Hub Search ---
     def search_bandcamp_tags(self, hub_url):
         logger.info(f"Auditing Bandcamp Tag Hub: {hub_url}")
         time.sleep(self.delay)
@@ -192,7 +193,7 @@ class TagDrivenScanner:
                 if clean not in self.seen_urls and clean not in candidate_urls:
                     candidate_urls.append(clean)
 
-        for u in candidate_urls[:8]:
+        for u in candidate_urls[:12]:
             self.inspect_bandcamp_release(u)
 
     def inspect_bandcamp_release(self, url):
@@ -213,7 +214,6 @@ class TagDrivenScanner:
         m = re.search(r'data-tralbum="([^"]+)"', txt)
         tr = json.loads(html.unescape(m.group(1))) if m else None
 
-        # Freshness Check
         pub_date = None
         if tr:
             cur = tr.get("current", {})
@@ -265,7 +265,7 @@ class TagDrivenScanner:
                 "dl_gate": url
             }
             self.new_discoveries.append(item)
-            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title} ({url})")
+            logger.info(f"[*] NEW BANDCAMP NYP: {artist} - {title}")
 
     @staticmethod
     def send_to_discord(webhook_url, payload):
@@ -283,26 +283,24 @@ class TagDrivenScanner:
         is_manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
         print("\n" + "=" * 75)
-        print("  TAG-DRIVEN 140 DUBPLATE & NYP DISCOVERY (GLOBAL)")
+        print("  DEEP-DIGGING 140 DUBPLATE & NYP DISCOVERY (GLOBAL)")
         print("=" * 75)
-        print(f"[*] Strategy: Global 140 / Deep Dubstep / Sound System Tag Queries")
-        print(f"[*] Window: Past {MAX_AGE_DAYS} Days (Fresh digital releases only)")
+        print(f"[*] Search Scope: 16 Global Queries x 50 Results Deep")
+        print(f"[*] Freshness Limit: Past {MAX_AGE_DAYS} Days")
 
-        # 1. Search SoundCloud via Tag Queries
         for q in SC_TAG_QUERIES:
-            self.search_soundcloud_tags(q, limit=20)
+            self.search_soundcloud_tags(q, limit=50)
 
-        # 2. Search Bandcamp Tag Hubs
         for hub in BC_TAG_HUBS:
             self.search_bandcamp_tags(hub)
 
         self.save_history()
 
-        print(f"\n[+] Scan finished! Found {len(self.new_discoveries)} new 140 dubs.")
+        print(f"\n[+] Scan finished! Discovered {len(self.new_discoveries)} new 140 dubs.")
 
         if webhook_url:
             if self.new_discoveries:
-                print(f"[*] Dispatching {len(self.new_discoveries)} releases to Discord...")
+                print(f"[*] Dispatching {len(self.new_discoveries)} new releases to Discord...")
                 for item in self.new_discoveries:
                     color = 0xff5500 if item["source"] == "SoundCloud" else 0x1da0c3
                     fields = [
@@ -328,10 +326,10 @@ class TagDrivenScanner:
                 print("[*] Sending manual check status to Discord...")
                 status = {
                     "embeds": [{
-                        "title": "🟢 140 Dubplate Scanner: Tag Search Active",
-                        "description": "Scanned global 140 & deep dubstep tags on SoundCloud and Bandcamp.\n\n**Result:** No brand-new free dubplates uploaded in the last window.\n*Standing by for new drops.*",
+                        "title": "🟢 140 Dubplate Scanner: Deep Scan Active",
+                        "description": "Scanned 16 queries at 50-track depth.\n\n**Result:** No new unreleased dubplates beyond what is already in your feed.\n*Monitoring for the next upload.*",
                         "color": 0x2ecc71,
-                        "footer": {"text": "Automated check every 6 hours"},
+                        "footer": {"text": "Automated schedule active every 6 hours"},
                         "timestamp": datetime.utcnow().isoformat() + "Z"
                     }]
                 }
@@ -339,6 +337,5 @@ class TagDrivenScanner:
 
 
 if __name__ == "__main__":
-    scanner = TagDrivenScanner()
+    scanner = DeepTagScanner()
     scanner.run()
-
